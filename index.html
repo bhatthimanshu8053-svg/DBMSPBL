@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Demand Prediction and Resource Optimization</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+
+<body>
+
+<div class="file-warning" id="file-warning" hidden>
+    <strong id="conn-message">Waiting for the backend...</strong><br>
+
+    <span id="conn-hint-flask">
+        Start it: open a terminal in the project folder and run
+        <code>python app.py</code>
+        (keep that terminal open). This page connects automatically.
+    </span>
+
+    <span id="conn-hint-db" hidden>
+        The backend is running; the problem is MySQL.
+        Fix it, then this page connects automatically.
+    </span>
+
+    <button type="button" onclick="connectAndStart()">Retry now</button>
+</div>
+
+<div class="app">
+
+    <!-- SIDEBAR -->
+
+    <aside class="sidebar">
+
+        <div class="brand">
+            <span class="brand-mark"></span>
+            <div>
+                <strong>Canteen Waste</strong><br>
+                <small>Demand &amp; Resource Optimizer</small>
+            </div>
+        </div>
+
+        <nav class="nav" id="nav">
+
+            <button class="nav-btn active" data-tab="dashboard"
+                onclick="showTab('dashboard')">Dashboard</button>
+
+            <button class="nav-btn" data-tab="food-items"
+                onclick="showTab('food-items')">Food Items</button>
+
+            <button class="nav-btn" data-tab="daily-records"
+                onclick="showTab('daily-records')">Daily Records</button>
+
+            <button class="nav-btn" data-tab="predictions"
+                onclick="showTab('predictions')">Demand Prediction</button>
+
+            <button class="nav-btn" data-tab="surplus"
+                onclick="showTab('surplus')">Surplus Food</button>
+
+            <button class="nav-btn" data-tab="facilities"
+                onclick="showTab('facilities')">Donation &amp; Compost</button>
+
+            <button class="nav-btn" data-tab="storage"
+                onclick="showTab('storage')">Food Storage</button>
+
+            <button class="nav-btn" data-tab="inventory"
+                onclick="showTab('inventory')">Inventory</button>
+
+            <button class="nav-btn" data-tab="donations-v3"
+                onclick="showTab('donations-v3')">Donation Workflow</button>
+
+            <button class="nav-btn" data-tab="simulation"
+                onclick="showTab('simulation')">What-if Simulation</button>
+
+            <button class="nav-btn" data-tab="audit"
+                onclick="showTab('audit')">Audit Logs</button>
+
+        </nav>
+
+        <p class="sidebar-foot">College PBL &middot; Phase 3</p>
+
+    </aside>
+
+
+    <main class="content">
+
+        <!-- DASHBOARD -->
+
+        <section id="dashboard" class="tab active">
+
+            <header class="page-head">
+                <h1>Dashboard</h1>
+                <p>Totals from all daily records stored in MySQL.</p>
+            </header>
+
+            <div class="cards">
+
+                <div class="card stat">
+                    <span class="stat-label">Total Prepared</span>
+                    <span class="stat-value" id="stat-prepared">0</span>
+                </div>
+
+                <div class="card stat">
+                    <span class="stat-label">Total Sold</span>
+                    <span class="stat-value" id="stat-sold">0</span>
+                </div>
+
+                <div class="card stat">
+                    <span class="stat-label">Total Leftover</span>
+                    <span class="stat-value" id="stat-leftover">0</span>
+                    <span class="stat-sub" id="stat-waste-pct">0% of prepared</span>
+                </div>
+
+                <div class="card stat stat-warn">
+                    <span class="stat-label">Estimated Waste Cost</span>
+                    <span class="stat-value" id="stat-waste">&#8377;0.00</span>
+                    <span class="stat-sub">leftover × production cost</span>
+                </div>
+
+            </div>
+
+            <div class="mini-stats">
+                <span>Food items: <strong id="stat-items">0</strong></span>
+                <span>Daily records: <strong id="stat-records">0</strong></span>
+                <span>Surplus still "Available": <strong id="stat-surplus">0</strong></span>
+            </div>
+
+            <p class="notice notice-info" id="chart-note" hidden></p>
+
+            <div class="grid-2">
+
+                <div class="panel">
+                    <h2>Prepared vs Sold (last 14 days)</h2>
+                    <div class="chart-box">
+                        <canvas id="chart-trend"></canvas>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>Waste Cost by Item (&#8377;)</h2>
+                    <div class="chart-box">
+                        <canvas id="chart-waste"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="panel">
+                <h2>Summary by Item</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th class="num">Prepared</th>
+                                <th class="num">Sold</th>
+                                <th class="num">Leftover</th>
+                                <th class="num">Waste Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dash-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- FOOD ITEMS -->
+
+        <section id="food-items" class="tab">
+
+            <header class="page-head">
+                <h1>Food Items</h1>
+                <p>Add the items your canteen sells, with their selling price and production cost.</p>
+            </header>
+
+            <div class="panel">
+
+                <h2 id="food-form-title">Add a Food Item</h2>
+
+                <form id="food-form" action="/api/food-items"
+                    method="post" onsubmit="submitFoodItem(event)">
+
+                    <input type="hidden" id="item-id">
+
+                    <div class="form-grid">
+
+                        <label>Item name
+                            <input type="text" id="item-name"
+                                maxlength="100" placeholder="e.g. Poha" required>
+                        </label>
+
+                        <label>Category
+                            <input type="text" id="item-category"
+                                maxlength="50" list="category-list"
+                                placeholder="e.g. Breakfast" required>
+
+                            <datalist id="category-list">
+                                <option value="Breakfast">
+                                <option value="Main Course">
+                                <option value="Snacks">
+                                <option value="Beverages">
+                                <option value="Dessert">
+                            </datalist>
+                        </label>
+
+                        <label>Selling price (&#8377;)
+                            <input type="number" id="item-price"
+                                min="0.01" step="0.01"
+                                placeholder="e.g. 40" required>
+                        </label>
+
+                        <label>Production cost (&#8377;)
+                            <input type="number" id="item-cost"
+                                min="0" step="0.01"
+                                placeholder="e.g. 22" required>
+                        </label>
+
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn" id="food-submit">
+                            Add Item
+                        </button>
+
+                        <button type="button" class="btn btn-secondary"
+                            id="food-cancel" onclick="cancelFoodEdit()" hidden>
+                            Cancel Edit
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+            <div class="panel">
+                <h2>All Food Items</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Category</th>
+                                <th class="num">Selling Price</th>
+                                <th class="num">Production Cost</th>
+                                <th class="num">Records</th>
+                                <th class="num">Total Sold</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="food-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+        <!-- DAILY RECORDS -->
+
+        <section id="daily-records" class="tab">
+
+            <header class="page-head">
+                <h1>Daily Records</h1>
+                <p>Enter how much was prepared and sold. Leftover is calculated automatically by MySQL.</p>
+            </header>
+
+            <div class="panel">
+
+                <h2 id="record-form-title">Add a Daily Record</h2>
+
+                <form id="record-form" action="/api/daily-records"
+                    method="post" onsubmit="submitRecord(event)">
+
+                    <input type="hidden" id="record-id">
+
+                    <div class="form-grid">
+
+                        <label>Date
+                            <input type="date" id="record-date"
+                                required oninput="updateRecordPreview()">
+                        </label>
+
+                        <label>Food item
+                            <select id="record-item" required
+                                onchange="updateRecordPreview()"></select>
+                        </label>
+
+                        <label>Prepared quantity
+                            <input type="number" id="record-prepared"
+                                min="1" step="1" required
+                                oninput="updateRecordPreview()">
+                        </label>
+
+                        <label>Sold quantity
+                            <input type="number" id="record-sold"
+                                min="0" step="1" required
+                                oninput="updateRecordPreview()">
+                        </label>
+
+                    </div>
+
+                    <p class="preview" id="record-preview">Leftover: &mdash;</p>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn" id="record-submit">
+                            Save Record
+                        </button>
+
+                        <button type="button" class="btn btn-secondary"
+                            id="record-cancel" onclick="cancelRecordEdit()" hidden>
+                            Cancel Edit
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+            <div class="panel">
+                <h2>Recent Records</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Item</th>
+                                <th class="num">Prepared</th>
+                                <th class="num">Sold</th>
+                                <th class="num">Leftover</th>
+                                <th class="num">Waste Cost</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="record-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- DEMAND PREDICTION -->
+
+        <section id="predictions" class="tab">
+
+            <header class="page-head">
+                <h1>Demand Prediction</h1>
+                <p>Estimate how much to prepare for tomorrow.</p>
+            </header>
+
+            <p class="notice notice-warn">
+                <strong>This is a basic estimate, not a trained machine-learning model.</strong>
+                It takes the average of the sold quantity from the last
+                7 available records of an item (fewer if less data exists)
+                and adds a 5% preparation buffer, rounded up.
+                A real forecasting model is planned for Phase 3.
+            </p>
+
+            <div class="panel">
+
+                <h2>Generate a Prediction</h2>
+
+                <form id="prediction-form" action="/api/predictions"
+                    method="post" onsubmit="runPrediction(event)">
+
+                    <div class="form-grid">
+                        <label>Food item
+                            <select id="pred-item" required></select>
+                        </label>
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn" id="pred-submit">
+                            Predict &amp; Save
+                        </button>
+                    </div>
+
+                </form>
+
+                <div id="pred-result"></div>
+            </div>
+
+            <div class="panel">
+
+                <h2>Saved Predictions</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>For Date</th>
+                                <th class="num">Records Used</th>
+                                <th class="num">Avg. Sales</th>
+                                <th class="num">Buffer</th>
+                                <th class="num">Recommended</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pred-table-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- SURPLUS FOOD -->
+
+        <section id="surplus" class="tab">
+
+            <header class="page-head">
+                <h1>Surplus Food</h1>
+                <p>Track what happened to leftover food.</p>
+            </header>
+
+            <div class="chips" id="surplus-summary"></div>
+
+            <div class="panel">
+
+                <h2>Record Surplus Food</h2>
+
+                <form id="surplus-form" action="/api/surplus"
+                    method="post" onsubmit="submitSurplus(event)">
+
+                    <div class="form-grid">
+
+                        <label>Daily record (with leftover)
+                            <select id="surplus-record" required
+                                onchange="onSurplusRecordChange()"></select>
+                        </label>
+
+                        <label>Quantity
+                            <input type="number" id="surplus-qty"
+                                min="1" step="1" required>
+                        </label>
+
+                        <label>Status
+                            <select id="surplus-status">
+                                <option>Available</option>
+                                <option>Donated</option>
+                                <option>Composted</option>
+                                <option>Discarded</option>
+                            </select>
+                        </label>
+
+                        <label>Facility (for Donated / Composted)
+                            <select id="surplus-facility"></select>
+                        </label>
+
+                        <label class="span-2">Notes (optional)
+                            <input type="text" id="surplus-notes"
+                                maxlength="255" placeholder="e.g. handed over at 6 pm">
+                        </label>
+
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn" id="surplus-submit">
+                            Save Surplus Entry
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+            <div class="panel">
+
+                <h2>Surplus Entries</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Item</th>
+                                <th class="num">Qty</th>
+                                <th class="num">Cost Value</th>
+                                <th>Status</th>
+                                <th>Facility</th>
+                                <th>Notes</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="surplus-table-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- REAL NEARBY FACILITIES MAP -->
+        <section id="facilities" class="tab">
+            <header class="page-head">
+                <h1>Nearby Food Support & Waste Facilities</h1>
+                <p>Live OpenStreetMap search around Bhimtal, Uttarakhand.</p>
+            </header>
+
+            <div class="map-toolbar">
+                <div>
+                    <strong>Bhimtal centre · 20 km radius</strong>
+                    <p class="small">Mapped locations only. Contact each organisation to confirm food acceptance and pickup.</p>
+                </div>
+                <button type="button" class="btn" onclick="loadFacilities(currentFacilityType)">Refresh map</button>
+            </div>
+
+            <div class="filters" id="facility-filters">
+                <button class="filter-btn active" data-type="" onclick="filterFacilities('')">All mapped places</button>
+                <button class="filter-btn" data-type="Food bank" onclick="filterFacilities('Food bank')">Food banks</button>
+                <button class="filter-btn" data-type="Social facility" onclick="filterFacilities('Social facility')">Social facilities</button>
+                <button class="filter-btn" data-type="NGO" onclick="filterFacilities('NGO')">NGOs</button>
+                <button class="filter-btn" data-type="Recycling point" onclick="filterFacilities('Recycling point')">Recycling</button>
+                <button class="filter-btn" data-type="Waste site" onclick="filterFacilities('Waste site')">Waste sites</button>
+            </div>
+
+            <div id="bhimtal-map" class="bhimtal-map" role="region" aria-label="OpenStreetMap showing mapped food support and waste facilities within 20 kilometres of Bhimtal"></div>
+            <p id="map-status" class="map-status" aria-live="polite">Loading nearby OpenStreetMap data...</p>
+            <div class="facility-grid" id="facility-list"></div>
+
+            <div class="panel map-note">
+                <h2>Local composting information</h2>
+                <p>Nainital district's environmental plan reports four wet-waste composting pits in Bhimtal. The report does not publish exact pit coordinates, so this project does not place guessed pins for them. Contact Nagar Panchayat Bhimtal to confirm access and operating details.</p>
+            </div>
+        </section>
+
+
+        <!-- FOOD STORAGE -->
+
+        <section id="storage" class="tab">
+
+            <header class="page-head">
+                <h1>Food Storage</h1>
+                <p>Record how prepared food is stored and see precautionary alerts.</p>
+            </header>
+
+            <p class="notice notice-warn">
+                Alerts are <strong>precautions only</strong>, based on the simple rules below
+                and on the data you enter.
+                They do not guarantee that food is safe or unsafe.
+                Always follow your canteen's food-safety procedures.
+            </p>
+
+            <details class="panel rules">
+
+                <summary>Rules used for alerts</summary>
+
+                <ul class="plain-list">
+                    <li>Room temperature for more than <strong>2 hours</strong> → warning</li>
+                    <li>Hot holding below <strong>60 °C</strong> → warning</li>
+                    <li>Refrigerated above <strong>5 °C</strong> → warning</li>
+                    <li>Refrigerated for more than <strong>72 hours (about 3 days)</strong> → warning</li>
+                    <li>Frozen above <strong>-18 °C</strong> → warning</li>
+                    <li>Temperature not entered where a rule needs it → information message</li>
+                </ul>
+
+                <p class="small">
+                    These are commonly used general food-safety guidelines.
+                    Check your local regulations for exact limits.
+                </p>
+
+            </details>
+
+            <div class="panel">
+
+                <h2>Add a Storage Record</h2>
+
+                <form id="storage-form" action="/api/storage"
+                    method="post" onsubmit="submitStorage(event)">
+
+                    <div class="form-grid">
+
+                        <label>Food item
+                            <select id="storage-item" required></select>
+                        </label>
+
+                        <label>Preparation time
+                            <input type="datetime-local" id="storage-time" required>
+                        </label>
+
+                        <label>Storage method
+                            <select id="storage-method">
+                                <option>Room Temperature</option>
+                                <option>Refrigerated</option>
+                                <option>Hot Holding</option>
+                                <option>Frozen</option>
+                            </select>
+                        </label>
+
+                        <label>Temperature °C (optional)
+                            <input type="number" id="storage-temp"
+                                step="0.1" min="-40" max="150" placeholder="e.g. 4">
+                        </label>
+
+                        <label class="span-2">Notes (optional)
+                            <input type="text" id="storage-notes"
+                                maxlength="255" placeholder="e.g. kept in the back fridge">
+                        </label>
+
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn" id="storage-submit">
+                            Save Storage Record
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+
+            <div class="panel">
+
+                <h2>Storage Records</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Prepared At</th>
+                                <th class="num">Hours Since</th>
+                                <th>Method</th>
+                                <th class="num">Temp</th>
+                                <th>Notes</th>
+                                <th>Alerts</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="storage-table-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- PHASE 3: INVENTORY -->
+
+        <section id="inventory" class="tab">
+
+            <header class="page-head">
+                <h1>Inventory Management</h1>
+                <p>Track ingredients, opening stock, reorder levels and low-stock alerts.</p>
+            </header>
+
+            <div class="panel">
+
+                <h2>Add ingredient / opening stock</h2>
+
+                <form id="ingredient-form" class="form-grid">
+
+                    <label>Ingredient name
+                        <input id="ingredient-name" maxlength="100"
+                            required placeholder="Rice">
+                    </label>
+
+                    <label>Unit
+                        <input id="ingredient-unit" maxlength="20"
+                            required value="kg">
+                    </label>
+
+                    <label>Reorder level
+                        <input id="ingredient-reorder" type="number"
+                            min="0" step="0.01" required value="5">
+                    </label>
+
+                    <label>Opening quantity
+                        <input id="ingredient-quantity" type="number"
+                            min="0" step="0.01" required value="20">
+                    </label>
+
+                    <div class="btn-row">
+                        <button class="btn" type="submit">Save Ingredient</button>
+                    </div>
+
+                </form>
+
+            </div>
+
+            <div class="panel">
+
+                <h2>Stock register</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ingredient</th>
+                                <th>Quantity</th>
+                                <th>Reorder at</th>
+                                <th>Status</th>
+                                <th>Adjust stock</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- PHASE 3: DONATION WORKFLOW -->
+
+        <section id="donations-v3" class="tab">
+
+            <header class="page-head">
+                <h1>Donation Workflow</h1>
+                <p>Create requests against available surplus and track collection status.</p>
+            </header>
+
+            <div class="panel">
+
+                <h2>Create donation request</h2>
+
+                <form id="donation-form" class="form-grid">
+
+                    <label>Available surplus record
+                        <select id="donation-surplus" required></select>
+                    </label>
+
+                    <label>Facility
+                        <select id="donation-facility">
+                            <option value="">Choose later</option>
+                        </select>
+                    </label>
+
+                    <label>Requested quantity
+                        <input id="donation-quantity" type="number"
+                            min="1" required>
+                    </label>
+
+                    <label>Notes
+                        <input id="donation-notes" maxlength="255">
+                    </label>
+
+                    <div class="btn-row">
+                        <button class="btn" type="submit">Create Request</button>
+                    </div>
+
+                </form>
+
+            </div>
+
+            <div class="panel">
+
+                <h2>Requests and collection status</h2>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Food</th>
+                                <th>Quantity</th>
+                                <th>Facility</th>
+                                <th>Status</th>
+                                <th>Update status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="donation-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+        <!-- PHASE 3: WHAT-IF SIMULATION -->
+
+        <section id="simulation" class="tab">
+
+            <header class="page-head">
+                <h1>What-if Simulation</h1>
+                <p>Estimate preparation, leftovers and cost under a demand scenario.</p>
+            </header>
+
+            <div class="panel">
+
+                <form id="simulation-form" class="form-grid">
+
+                    <label>Food item
+                        <select id="sim-item" required></select>
+                    </label>
+
+                    <label>Expected demand (plates)
+                        <input id="sim-demand" type="number"
+                            min="0" required value="100">
+                    </label>
+
+                    <label>Preparation buffer (%)
+                        <input id="sim-buffer" type="number"
+                            min="0" max="100" required value="5">
+                    </label>
+
+                    <div class="btn-row">
+                        <button class="btn" type="submit">Run Simulation</button>
+                    </div>
+
+                </form>
+
+                <div id="simulation-result" class="phase3-result"
+                    aria-live="polite">
+                    Enter a scenario and run the simulation.
+                </div>
+
+            </div>
+
+            <div class="panel">
+
+                <h2>7-day baseline demand forecast</h2>
+
+                <p class="muted">
+                    A transparent moving-average baseline using the latest
+                    available sales records, not a trained ML model.
+                </p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Food item</th>
+                                <th>Records</th>
+                                <th>Average sales</th>
+                                <th>Recommended preparation</th>
+                            </tr>
+                        </thead>
+                        <tbody id="forecast-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- PHASE 3: AUDIT LOGS -->
+
+        <section id="audit" class="tab">
+
+            <header class="page-head">
+                <h1>Audit Logs</h1>
+                <p>Recent inventory and donation actions recorded for traceability.</p>
+            </header>
+
+            <div class="panel">
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Entity</th>
+                                <th>ID</th>
+                                <th>Action</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+</body>
+</html>
